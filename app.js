@@ -42,39 +42,41 @@ function SeedInventoryApp() {
   const [newExperiment, setNewExperiment] = useState({ name: '', toteId: '' });
   const [showSuccess, setShowSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [showImportHelp, setShowImportHelp] = useState(false);
 
   useEffect(() => {
     loadData();
   }, []);
 
-  const loadData = () => {
+  const loadData = async () => {
     setIsLoading(true);
     try {
+      // Load experiments from localStorage
       const storedExperiments = localStorage.getItem('seed_experiments');
-      const storedTotes = localStorage.getItem('seed_tote_boxes');
-      
       if (storedExperiments) {
         setExperiments(JSON.parse(storedExperiments));
       }
       
-      if (storedTotes) {
-        setToteBoxes(JSON.parse(storedTotes));
-      } else {
+      // Load tote boxes from totes.json file
+      try {
+        const response = await fetch('totes.json');
+        if (response.ok) {
+          const data = await response.json();
+          setToteBoxes(data.totes || data);
+        } else {
+          throw new Error('Failed to load totes.json');
+        }
+      } catch (toteError) {
+        console.error('Error loading totes.json:', toteError);
+        // Fallback to default totes if file doesn't exist
         const defaultTotes = [
           'TB-001', 'TB-002', 'TB-003', 'TB-004', 'TB-005',
           'TB-006', 'TB-007', 'TB-008', 'TB-009', 'TB-010'
         ];
         setToteBoxes(defaultTotes);
-        localStorage.setItem('seed_tote_boxes', JSON.stringify(defaultTotes));
       }
     } catch (error) {
       console.error('Error loading data:', error);
-      const defaultTotes = [
-        'TB-001', 'TB-002', 'TB-003', 'TB-004', 'TB-005',
-        'TB-006', 'TB-007', 'TB-008', 'TB-009', 'TB-010'
-      ];
-      setToteBoxes(defaultTotes);
-      localStorage.setItem('seed_tote_boxes', JSON.stringify(defaultTotes));
     }
     setIsLoading(false);
   };
@@ -202,14 +204,20 @@ function SeedInventoryApp() {
             }, React.createElement(Download, { className: 'w-5 h-5' })),
             React.createElement('label', {
               className: 'p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer',
-              title: 'Import CSV'
+              title: 'Import CSV',
+              onClick: (e) => {
+                if (!e.target.matches('input')) {
+                  setShowImportHelp(true);
+                }
+              }
             },
               React.createElement(Upload, { className: 'w-5 h-5' }),
               React.createElement('input', {
                 type: 'file',
                 accept: '.csv',
                 onChange: handleImportCSV,
-                className: 'hidden'
+                className: 'hidden',
+                onClick: (e) => e.stopPropagation()
               })
             )
           )
@@ -218,6 +226,32 @@ function SeedInventoryApp() {
     ),
 
     React.createElement('div', { className: 'max-w-4xl mx-auto px-4 py-6' },
+      // Import Help Modal
+      showImportHelp && React.createElement('div', {
+        className: 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4',
+        onClick: () => setShowImportHelp(false)
+      },
+        React.createElement('div', {
+          className: 'bg-white rounded-xl p-6 max-w-md w-full shadow-xl',
+          onClick: (e) => e.stopPropagation()
+        },
+          React.createElement('h3', { className: 'text-xl font-bold mb-4 text-gray-800' }, 'CSV Import Format'),
+          React.createElement('p', { className: 'text-gray-600 mb-4' }, 'Your CSV file should have these columns:'),
+          React.createElement('div', { className: 'bg-gray-50 p-4 rounded-lg mb-4 font-mono text-sm' },
+            'Experiment Name,Tote Box ID,Date Added',
+            React.createElement('br'),
+            '"Winter Wheat 2025",TB-001,10/29/2024',
+            React.createElement('br'),
+            '"Corn Hybrid Test",TB-003,10/28/2024'
+          ),
+          React.createElement('p', { className: 'text-sm text-gray-500 mb-4' }, 'Note: Date Added column is optional and will auto-generate if missing.'),
+          React.createElement('button', {
+            onClick: () => setShowImportHelp(false),
+            className: 'w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition'
+          }, 'Got it!')
+        )
+      ),
+
       view === 'home' && React.createElement('div', { className: 'space-y-6' },
         React.createElement('div', { className: 'bg-gradient-to-r from-green-500 to-green-600 rounded-xl p-6 text-white shadow-lg' },
           React.createElement('div', { className: 'flex items-center gap-4 mb-4' },
