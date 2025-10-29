@@ -5,7 +5,7 @@ const DEFAULT_TOTES = ['TB-S001', 'TB-S002', 'TB-A20', 'TB-B35', 'TB-Z99'];
 
 // Firebase Configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyDJXvOrMkP1qOka-WngvNPjOEwKM7smxtg",
+  apiKey: "AIzaSyDJXvOrMkP1qOka-WngvNPjOEcKM7smxtg",
   authDomain: "seed-inventory-app.firebaseapp.com",
   projectId: "seed-inventory-app",
   storageBucket: "seed-inventory-app.firebasestorage.app",
@@ -111,9 +111,7 @@ function SeedInventoryApp() {
     setIsLoading(false);
   }, []);
 
-  // Removed old tote loading useEffect (Fix 2: Tote ID persistence)
-
-  // Real-time listener for experiments AND totes (Fix 2: Tote ID persistence)
+  // Real-time listener for experiments AND totes
   useEffect(() => {
     if (!workspaceId) {
         // Reset toteBoxes to defaults when no workspace is active
@@ -300,25 +298,45 @@ function SeedInventoryApp() {
   // MODIFIED: Logic to handle adding a new experiment, including new tote creation and confirmation.
   const handleAddExperiment = async (confirmed = false) => {
     let finalToteId = newExperiment.toteId;
+    const experimentName = newExperiment.name.trim();
 
     if (toteInputMode === 'new') {
         finalToteId = newToteId.trim();
     }
     
-    if (!newExperiment.name.trim() || !finalToteId) {
+    if (!experimentName || !finalToteId) {
       setError('Please fill in all fields');
       return;
     }
 
     setError('');
     
-    // Check for existing tote error only for the "Add new tote" input field before final submission
+    // Check 1: Experiment name duplication (Manual Entry Fix)
+    try {
+        const querySnapshot = await db.collection('workspaces')
+            .doc(workspaceId)
+            .collection('experiments')
+            .where('name', '==', experimentName)
+            .limit(1)
+            .get();
+
+        if (querySnapshot.size > 0) {
+            setError('Error: Experiment already exists in database');
+            return;
+        }
+    } catch (checkError) {
+        console.error('Error checking for duplicate experiment:', checkError);
+        setError('A database error occurred while checking for duplicates. Please try again.');
+        return;
+    }
+    
+    // Check 2: Tote ID existence check (only when adding a NEW tote)
     if (toteInputMode === 'new' && toteBoxes.includes(finalToteId) && !confirmed) {
          setError(`Error: Tote ID "${finalToteId}" already exists. Please select it from the dropdown or enter a new unique ID.`);
          return;
     }
     
-    // Check if new tote is being added AND it's a *new* tote ID
+    // Check 3: New tote creation confirmation flow
     if (toteInputMode === 'new' && !toteBoxes.includes(finalToteId)) {
         if (!confirmed) {
             // Trigger confirmation dialog for new tote
@@ -340,13 +358,13 @@ function SeedInventoryApp() {
         }
     }
     
-    // Add experiment
+    // Final Step: Add experiment
     try {
       await db.collection('workspaces')
         .doc(workspaceId)
         .collection('experiments')
         .add({
-          name: newExperiment.name.trim(),
+          name: experimentName,
           toteId: finalToteId,
           dateAdded: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -403,6 +421,7 @@ function SeedInventoryApp() {
     URL.revokeObjectURL(url);
   };
 
+  // MODIFIED: Imports CSV, skipping duplicate experiment names
   const handleImportCSV = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -417,6 +436,14 @@ function SeedInventoryApp() {
         let experimentCount = 0;
         let toteIdsToAdd = new Set();
         const existingTotes = new Set(toteBoxes);
+        let skippedCount = 0;
+        
+        // Fetch all existing experiment names for efficient duplicate checking
+        const existingExperimentsSnapshot = await db.collection('workspaces')
+            .doc(workspaceId)
+            .collection('experiments')
+            .get();
+        const existingExperimentNames = new Set(existingExperimentsSnapshot.docs.map(doc => doc.data().name.trim()));
 
         lines.filter(line => line.trim()).forEach(line => {
           // Corrected split for CSV with quoted names
@@ -424,18 +451,26 @@ function SeedInventoryApp() {
           const [name, toteId] = parts;
 
           if (name && toteId) {
+            const experimentName = name.trim();
+            
+            // SKIP: If experiment name already exists
+            if (existingExperimentNames.has(experimentName)) {
+                skippedCount++;
+                return; 
+            }
+            
             // 1. Add tote ID to a set for batch creation if it's new
             if (!existingTotes.has(toteId) && !DEFAULT_TOTES.includes(toteId) && toteId.length > 0) {
                 toteIdsToAdd.add(toteId);
             }
             
-            // 2. Prepare experiment for batch addition (This is what causes duplicates if re-imported)
+            // 2. Prepare experiment for batch addition
             const ref = db.collection('workspaces')
               .doc(workspaceId)
               .collection('experiments')
               .doc();
             batch.set(ref, {
-              name,
+              name: experimentName,
               toteId,
               dateAdded: firebase.firestore.FieldValue.serverTimestamp()
             });
@@ -454,7 +489,7 @@ function SeedInventoryApp() {
         });
 
         await batch.commit();
-        alert(`Successfully imported ${experimentCount} experiments. Added ${toteIdsToAdd.size} new tote IDs.`);
+        alert(`Successfully imported ${experimentCount} unique experiments. Added ${toteIdsToAdd.size} new tote IDs. Skipped ${skippedCount} duplicate experiments.`);
       } catch (error) {
         console.error('Error importing CSV:', error);
         alert('Error importing CSV. Please check the file format and ensure no values contain commas without quotes.');
@@ -478,7 +513,7 @@ function SeedInventoryApp() {
     );
   }
 
-  // Setup view (No changes)
+  // Setup view
   if (view === 'setup') {
     return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center p-4' },
       React.createElement('div', { className: 'max-w-md w-full' },
@@ -720,7 +755,7 @@ function SeedInventoryApp() {
           error && React.createElement('div', { className: 'mb-6 bg-red-50 border border-red-200 rounded-lg p-4' },
             React.createElement('p', { className: 'text-red-800 text-sm' }, error),
             // Back option for the error: tote already exist
-            error.startsWith('Error: Tote ID') && React.createElement('button', {
+            (error.startsWith('Error: Tote ID') || error.startsWith('Error: Experiment')) && React.createElement('button', {
                 onClick: () => setError(''),
                 className: 'mt-2 text-blue-600 hover:text-blue-800 text-sm font-medium'
             }, 'Back')
