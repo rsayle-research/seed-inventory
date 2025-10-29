@@ -451,19 +451,6 @@ function SeedInventoryApp() {
       ),
 
       view === 'home' && React.createElement('div', { className: 'space-y-6' },
-        React.createElement('div', { className: 'bg-gradient-to-r from-green-500 to-green-600 rounded-xl p-6 text-white shadow-lg' },
-          React.createElement('div', { className: 'flex items-center gap-4 mb-4' },
-            React.createElement(Camera, { className: 'w-8 h-8' }),
-            React.createElement('div', null,
-              React.createElement('h2', { className: 'text-xl font-bold' }, 'QR Code Scanner'),
-              React.createElement('p', { className: 'text-green-100 text-sm' }, 'Scan to quickly access inventory')
-            )
-          ),
-          React.createElement('p', { className: 'text-sm text-green-50' },
-            'Generate QR codes that link to: https://rsayle-research.github.io/seed-inventory'
-          )
-        ),
-
         React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4' },
           React.createElement('button', {
             onClick: () => setView('add'),
