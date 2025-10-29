@@ -1,5 +1,8 @@
 const { useState, useEffect } = React;
 
+// Define Global Constants
+const DEFAULT_TOTES = ['TB-S001', 'TB-S002', 'TB-A20', 'TB-B35', 'TB-Z99'];
+
 // Firebase Configuration
 const firebaseConfig = {
   apiKey: "AIzaSyDJXvOrMkP1qOka-WngvNPjOEwKM7smxtg",
@@ -48,10 +51,6 @@ const CheckCircle = ({ className }) => React.createElement('svg', { className, f
   React.createElement('path', { strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 2, d: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' })
 );
 
-const Users = ({ className }) => React.createElement('svg', { className, fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' },
-  React.createElement('path', { strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 2, d: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' })
-);
-
 const Key = ({ className }) => React.createElement('svg', { className, fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' },
   React.createElement('path', { strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 2, d: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z' })
 );
@@ -60,13 +59,35 @@ const LogOut = ({ className }) => React.createElement('svg', { className, fill: 
   React.createElement('path', { strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 2, d: 'M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1' })
 );
 
+// NEW: Settings Icon
+const Settings = ({ className }) => React.createElement('svg', { className, fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' },
+  React.createElement('path', { strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 2, d: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.527.27.765.578.966.965.176.33.197.716.142 1.157-.058.46-.153.886-.296 1.285-.12.33-.275.632-.462.903-.223.33-.497.604-.814.827-.47.33-.94.498-1.396.498-.596 0-1.07-.373-1.427-.903-.357-.53-.518-1.125-.48-1.748.046-.732.336-1.42.846-2.035.51-.616 1.15-1.104 1.884-1.44zM12 15a3 3 0 100-6 3 3 0 000 6z' })
+);
+
+// HELPER FUNCTION: Deletes documents in a collection in batches (for clear database)
+const deleteCollection = async (collectionRef, batchSize = 100) => {
+    const query = collectionRef.limit(batchSize);
+    let snapshot = await query.get();
+
+    while (snapshot.size > 0) {
+        const batch = db.batch();
+        snapshot.docs.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        await batch.commit();
+        
+        // Get the next batch
+        snapshot = await query.get();
+    }
+};
+
 function SeedInventoryApp() {
   const [view, setView] = useState('setup');
   const [workspaceId, setWorkspaceId] = useState('');
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [inputWorkspaceId, setInputWorkspaceId] = useState('');
   const [experiments, setExperiments] = useState([]);
-  const [toteBoxes, setToteBoxes] = useState([]);
+  const [toteBoxes, setToteBoxes] = useState(DEFAULT_TOTES);
   const [searchQuery, setSearchQuery] = useState('');
   const [newExperiment, setNewExperiment] = useState({ name: '', toteId: '' });
   const [showSuccess, setShowSuccess] = useState(false);
@@ -90,25 +111,28 @@ function SeedInventoryApp() {
     setIsLoading(false);
   }, []);
 
-  // Load tote boxes from file
-  // MODIFIED: Changed default tote names
-  useEffect(() => {
-    fetch('totes.json')
-      .then(res => res.json())
-      .then(data => setToteBoxes(data.totes || data))
-      .catch(() => {
-        // Updated default tote box names
-        const defaultTotes = ['TB-S001', 'TB-S002', 'TB-A20', 'TB-B35', 'TB-Z99'];
-        setToteBoxes(defaultTotes);
-      });
-  }, []);
+  // Removed old tote loading useEffect (Fix 2: Tote ID persistence)
 
-  // Real-time listener for experiments AND totes
+  // Real-time listener for experiments AND totes (Fix 2: Tote ID persistence)
   useEffect(() => {
-    if (!workspaceId) return;
+    if (!workspaceId) {
+        // Reset toteBoxes to defaults when no workspace is active
+        setToteBoxes(DEFAULT_TOTES);
+        // Also clear experiments
+        setExperiments([]);
+        return;
+    }
+
+    // Set the base totes for the workspace (defaults + any file-loaded)
+    // For this version, we will only use the hardcoded defaults as the base.
+    const baseTotes = [...DEFAULT_TOTES];
+    setToteBoxes(baseTotes.sort());
+
+    let unsubscribeExp = () => {};
+    let unsubscribeTotes = () => {};
 
     // Listener for Experiments
-    const unsubscribeExp = db.collection('workspaces')
+    unsubscribeExp = db.collection('workspaces')
       .doc(workspaceId)
       .collection('experiments')
       .orderBy('dateAdded', 'desc')
@@ -124,20 +148,19 @@ function SeedInventoryApp() {
       });
 
     // Listener for Totes
-    // Assuming a 'totes' collection under 'workspaces' for dynamically added totes
-    const unsubscribeTotes = db.collection('workspaces')
+    // This listener now ensures dynamic totes are correctly merged with the *current* baseTotes
+    unsubscribeTotes = db.collection('workspaces')
       .doc(workspaceId)
       .collection('totes')
       .onSnapshot(snapshot => {
         const dynamicTotes = snapshot.docs.map(doc => doc.id);
         
-        // Merge with file-loaded totes (if any)
-        setToteBoxes(prevTotes => {
-            const fileTotes = prevTotes.filter(tote => !dynamicTotes.includes(tote));
-            const uniqueDynamicTotes = dynamicTotes.filter(tote => !fileTotes.includes(tote));
-
-            // Keep the default/file totes and append the new dynamic ones, then sort
-            return [...fileTotes, ...uniqueDynamicTotes].sort();
+        setToteBoxes(() => {
+            // Use a Set to ensure unique IDs, starting with the base totes
+            const uniqueTotes = new Set(baseTotes); 
+            dynamicTotes.forEach(tote => uniqueTotes.add(tote));
+            
+            return Array.from(uniqueTotes).sort();
         });
 
       }, error => {
@@ -232,10 +255,49 @@ function SeedInventoryApp() {
       localStorage.removeItem('workspaceId');
       setView('setup');
       setExperiments([]);
+      setToteBoxes(DEFAULT_TOTES); // Ensure a full reset
     }
   };
 
-  // NEW/MODIFIED: Logic to handle adding a new experiment, including new tote creation and confirmation.
+  // NEW FEATURE: Clear database
+  const handleClearDatabase = async () => {
+      // Confirmation 1: Backup
+      const confirmBackup = confirm('WARNING: You are about to clear ALL data (experiments and totes) from your current workspace. Would you like to export a CSV backup before proceeding?');
+      
+      if (confirmBackup) {
+          handleExportCSV();
+      }
+      
+      // Confirmation 2: Final Clear
+      const confirmClear = confirm('Are you absolutely sure you want to clear ALL experiments and totes for this workspace? This action is irreversible.');
+
+      if (confirmClear) {
+          setIsLoading(true); // Show loading spinner while deleting
+          try {
+              const expRef = db.collection('workspaces').doc(workspaceId).collection('experiments');
+              const totesRef = db.collection('workspaces').doc(workspaceId).collection('totes');
+
+              // Delete all experiments
+              await deleteCollection(expRef);
+              // Delete all dynamic totes
+              await deleteCollection(totesRef);
+
+              // Reset state and view
+              setExperiments([]);
+              setToteBoxes(DEFAULT_TOTES);
+              setView('home');
+              alert(`Successfully cleared all data from workspace: ${workspaceId}`);
+          } catch (error) {
+              console.error('Error clearing database:', error);
+              setError('Failed to clear database. Please try again.');
+          } finally {
+              setIsLoading(false);
+          }
+      }
+  };
+
+
+  // MODIFIED: Logic to handle adding a new experiment, including new tote creation and confirmation.
   const handleAddExperiment = async (confirmed = false) => {
     let finalToteId = newExperiment.toteId;
 
@@ -250,6 +312,12 @@ function SeedInventoryApp() {
 
     setError('');
     
+    // Check for existing tote error only for the "Add new tote" input field before final submission
+    if (toteInputMode === 'new' && toteBoxes.includes(finalToteId) && !confirmed) {
+         setError(`Error: Tote ID "${finalToteId}" already exists. Please select it from the dropdown or enter a new unique ID.`);
+         return;
+    }
+    
     // Check if new tote is being added AND it's a *new* tote ID
     if (toteInputMode === 'new' && !toteBoxes.includes(finalToteId)) {
         if (!confirmed) {
@@ -258,32 +326,20 @@ function SeedInventoryApp() {
             return;
         }
 
-        // Check if new tote ID already exists (just in case of race condition or if the user used the input field for an existing tote)
-        if (toteBoxes.includes(finalToteId)) {
-            // This should not happen if confirmation is true and the state was correct, but good to check.
-            console.warn('Tote already exists, proceeding without creation.');
-        } else {
-            // New tote is confirmed and needs creation
-            try {
-                await db.collection('workspaces')
-                    .doc(workspaceId)
-                    .collection('totes')
-                    .doc(finalToteId)
-                    .set({ createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-                console.log(`New tote ${finalToteId} created successfully.`);
-            } catch (error) {
-                console.error('Error creating new tote:', error);
-                // Non-fatal error, continue adding experiment
-            }
+        // New tote is confirmed and needs creation
+        try {
+            await db.collection('workspaces')
+                .doc(workspaceId)
+                .collection('totes')
+                .doc(finalToteId)
+                .set({ createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+            console.log(`New tote ${finalToteId} created successfully.`);
+        } catch (error) {
+            console.error('Error creating new tote:', error);
+            // Non-fatal error, continue adding experiment
         }
     }
     
-    // Check for existing tote error only for the "Add new tote" input field before final submission
-    if (toteInputMode === 'new' && toteBoxes.includes(finalToteId) && !confirmed) {
-         setError(`Error: Tote ID "${finalToteId}" already exists. Please select it from the dropdown or enter a new unique ID.`);
-         return;
-    }
-
     // Add experiment
     try {
       await db.collection('workspaces')
@@ -316,7 +372,7 @@ function SeedInventoryApp() {
   const handleConfirmAddExperiment = (isConfirmed) => {
       setShowConfirmation(false);
       if (isConfirmed) {
-          handleAddExperiment(true); // Pass true to skip confirmation and check for existing tote logic
+          handleAddExperiment(true); // Pass true to skip confirmation and existing tote check
       }
   };
 
@@ -342,7 +398,7 @@ function SeedInventoryApp() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `seed-inventory-${workspaceId}-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `seed-inventory-backup-${workspaceId}-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -363,17 +419,17 @@ function SeedInventoryApp() {
         const existingTotes = new Set(toteBoxes);
 
         lines.filter(line => line.trim()).forEach(line => {
-          // MODIFIED: Corrected split for CSV with quoted names
+          // Corrected split for CSV with quoted names
           const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(s => s.replace(/"/g, '').trim());
           const [name, toteId] = parts;
 
           if (name && toteId) {
             // 1. Add tote ID to a set for batch creation if it's new
-            if (!existingTotes.has(toteId) && toteId.length > 0) {
+            if (!existingTotes.has(toteId) && !DEFAULT_TOTES.includes(toteId) && toteId.length > 0) {
                 toteIdsToAdd.add(toteId);
             }
             
-            // 2. Prepare experiment for batch addition
+            // 2. Prepare experiment for batch addition (This is what causes duplicates if re-imported)
             const ref = db.collection('workspaces')
               .doc(workspaceId)
               .collection('experiments')
@@ -387,12 +443,13 @@ function SeedInventoryApp() {
           }
         });
 
-        // 3. Add new totes to the batch (this handles new/existing totes correctly)
+        // 3. Add new totes to the batch (handles new/existing dynamic totes correctly)
         toteIdsToAdd.forEach(toteId => {
             const toteRef = db.collection('workspaces')
                 .doc(workspaceId)
                 .collection('totes')
                 .doc(toteId);
+            // Use set with merge: true to avoid overwriting if a doc with the same ID already exists (though it shouldn't here)
             batch.set(toteRef, { createdAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
         });
 
@@ -523,6 +580,13 @@ function SeedInventoryApp() {
                 onClick: (e) => e.stopPropagation()
               })
             ),
+            // NEW: Settings Button
+            React.createElement('button', {
+              onClick: () => setView('settings'),
+              className: 'p-2 text-yellow-600 hover:bg-yellow-50 rounded-lg transition',
+              title: 'Settings'
+            }, React.createElement(Settings, { className: 'w-5 h-5' })),
+
             React.createElement('button', {
               onClick: handleLeaveWorkspace,
               className: 'p-2 text-red-600 hover:bg-red-50 rounded-lg transition',
@@ -559,10 +623,10 @@ function SeedInventoryApp() {
         )
       ),
       
-      // NEW: Confirmation Dialog
+      // Confirmation Dialog
       showConfirmation && React.createElement('div', {
         className: 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4',
-        onClick: () => handleConfirmAddExperiment(false) // No on click on overlay to prevent accidental no
+        onClick: () => handleConfirmAddExperiment(false) 
       },
         React.createElement('div', {
           className: 'bg-white rounded-xl p-6 max-w-sm w-full shadow-xl',
@@ -629,7 +693,7 @@ function SeedInventoryApp() {
         )
       ),
 
-      // MODIFIED: 'add' view to support selecting or adding a new tote
+      // 'add' view
       view === 'add' && React.createElement('div', { className: 'space-y-6' },
         React.createElement('button', {
           onClick: () => {
@@ -654,7 +718,12 @@ function SeedInventoryApp() {
           ),
 
           error && React.createElement('div', { className: 'mb-6 bg-red-50 border border-red-200 rounded-lg p-4' },
-            React.createElement('p', { className: 'text-red-800 text-sm' }, error)
+            React.createElement('p', { className: 'text-red-800 text-sm' }, error),
+            // Back option for the error: tote already exist
+            error.startsWith('Error: Tote ID') && React.createElement('button', {
+                onClick: () => setError(''),
+                className: 'mt-2 text-blue-600 hover:text-blue-800 text-sm font-medium'
+            }, 'Back')
           ),
 
           React.createElement('div', { className: 'space-y-4' },
@@ -714,6 +783,7 @@ function SeedInventoryApp() {
         )
       ),
 
+      // 'search' view
       view === 'search' && React.createElement('div', { className: 'space-y-6' },
         React.createElement('button', {
           onClick: () => setView('home'),
@@ -761,6 +831,39 @@ function SeedInventoryApp() {
                 )
               )
             )
+        )
+      ),
+
+      // NEW FEATURE: Settings View
+      view === 'settings' && React.createElement('div', { className: 'space-y-6' },
+        React.createElement('button', {
+          onClick: () => setView('home'),
+          className: 'flex items-center gap-2 text-gray-600 hover:text-gray-800'
+        },
+          React.createElement(X, { className: 'w-5 h-5' }),
+          React.createElement('span', null, 'Back to Home')
+        ),
+
+        React.createElement('div', { className: 'bg-white rounded-xl p-6 shadow-md' },
+          React.createElement('h2', { className: 'text-2xl font-bold mb-4 text-gray-800' }, 'Workspace Settings'),
+          
+          error && React.createElement('div', { className: 'mb-6 bg-red-50 border border-red-200 rounded-lg p-4' },
+              React.createElement('p', { className: 'text-red-800 text-sm' }, error)
+          ),
+
+          React.createElement('div', { className: 'p-4 border border-red-200 bg-red-50 rounded-lg' },
+            React.createElement('h3', { className: 'text-xl font-bold text-red-800 mb-3' }, 'Danger Zone: Clear Database'),
+            React.createElement('p', { className: 'text-gray-700 text-sm mb-4' },
+              'This action will permanently delete ALL experiments and ALL custom tote IDs in the **',
+              React.createElement('span', { className: 'font-semibold' }, workspaceId),
+              '** workspace. This cannot be undone.'
+            ),
+            React.createElement('button', {
+              onClick: handleClearDatabase,
+              disabled: isLoading,
+              className: `w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`
+            }, isLoading ? 'Clearing Data...' : 'Clear All Database Data')
+          )
         )
       )
     )
