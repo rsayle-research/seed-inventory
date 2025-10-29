@@ -1,6 +1,20 @@
 const { useState, useEffect } = React;
 
-// Simple icon components to replace Lucide
+// Firebase Configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDJXvOrMkP1qOka-WngvNPjOEwKM7smxtg",
+  authDomain: "seed-inventory-app.firebaseapp.com",
+  projectId: "seed-inventory-app",
+  storageBucket: "seed-inventory-app.firebasestorage.app",
+  messagingSenderId: "918505019673",
+  appId: "1:918505019673:web:fe94c52cdc2bb59b360d88"
+};
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// Icon components
 const Search = ({ className }) => React.createElement('svg', { className, fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' },
   React.createElement('path', { strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 2, d: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' })
 );
@@ -34,8 +48,32 @@ const CheckCircle = ({ className }) => React.createElement('svg', { className, f
   React.createElement('path', { strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 2, d: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' })
 );
 
+const Users = ({ className }) => React.createElement('svg', { className, fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' },
+  React.createElement('path', { strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 2, d: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' })
+);
+
+const Key = ({ className }) => React.createElement('svg', { className, fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' },
+  React.createElement('path', { strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 2, d: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z' })
+);
+
+const LogOut = ({ className }) => React.createElement('svg', { className, fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' },
+  React.createElement('path', { strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 2, d: 'M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1' })
+);
+
+// Generate workspace ID
+function generateWorkspaceId() {
+  const adjectives = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Omega', 'Sigma', 'Theta'];
+  const nouns = ['Lab', 'Farm', 'Research', 'Seeds', 'Growth', 'Harvest'];
+  const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+  const noun = nouns[Math.floor(Math.random() * nouns.length)];
+  const num = Math.floor(1000 + Math.random() * 9000);
+  return `${adj}-${noun}-${num}`;
+}
+
 function SeedInventoryApp() {
-  const [view, setView] = useState('home');
+  const [view, setView] = useState('setup');
+  const [workspaceId, setWorkspaceId] = useState('');
+  const [inputWorkspaceId, setInputWorkspaceId] = useState('');
   const [experiments, setExperiments] = useState([]);
   const [toteBoxes, setToteBoxes] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,76 +81,130 @@ function SeedInventoryApp() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [showImportHelp, setShowImportHelp] = useState(false);
+  const [error, setError] = useState('');
 
+  // Check for existing workspace on load
   useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    setIsLoading(true);
-    try {
-      // Load experiments from localStorage
-      const storedExperiments = localStorage.getItem('seed_experiments');
-      if (storedExperiments) {
-        setExperiments(JSON.parse(storedExperiments));
-      }
-      
-      // Load tote boxes from totes.json file
-      try {
-        const response = await fetch('totes.json');
-        if (response.ok) {
-          const data = await response.json();
-          setToteBoxes(data.totes || data);
-        } else {
-          throw new Error('Failed to load totes.json');
-        }
-      } catch (toteError) {
-        console.error('Error loading totes.json:', toteError);
-        // Fallback to default totes if file doesn't exist
-        const defaultTotes = [
-          'TB-001', 'TB-002', 'TB-003', 'TB-004', 'TB-005',
-          'TB-006', 'TB-007', 'TB-008', 'TB-009', 'TB-010'
-        ];
-        setToteBoxes(defaultTotes);
-      }
-    } catch (error) {
-      console.error('Error loading data:', error);
+    const savedWorkspaceId = localStorage.getItem('workspaceId');
+    if (savedWorkspaceId) {
+      setWorkspaceId(savedWorkspaceId);
+      setView('home');
     }
     setIsLoading(false);
-  };
+  }, []);
 
-  const saveExperiments = (updatedExperiments) => {
+  // Load tote boxes from file
+  useEffect(() => {
+    fetch('totes.json')
+      .then(res => res.json())
+      .then(data => setToteBoxes(data.totes || data))
+      .catch(() => {
+        const defaultTotes = ['TB-001', 'TB-002', 'TB-003', 'TB-004', 'TB-005'];
+        setToteBoxes(defaultTotes);
+      });
+  }, []);
+
+  // Real-time listener for experiments
+  useEffect(() => {
+    if (!workspaceId) return;
+
+    const unsubscribe = db.collection('workspaces')
+      .doc(workspaceId)
+      .collection('experiments')
+      .orderBy('dateAdded', 'desc')
+      .onSnapshot(snapshot => {
+        const exps = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setExperiments(exps);
+      }, error => {
+        console.error('Error loading experiments:', error);
+        setError('Failed to load experiments. Please check your connection.');
+      });
+
+    return () => unsubscribe();
+  }, [workspaceId]);
+
+  const handleCreateWorkspace = async () => {
+    const newId = generateWorkspaceId();
+    setWorkspaceId(newId);
+    localStorage.setItem('workspaceId', newId);
+    
+    // Create workspace document
     try {
-      localStorage.setItem('seed_experiments', JSON.stringify(updatedExperiments));
-      setExperiments(updatedExperiments);
+      await db.collection('workspaces').doc(newId).set({
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        name: newId
+      });
+      setView('home');
     } catch (error) {
-      console.error('Error saving experiments:', error);
-      alert('Failed to save experiment. Please try again.');
+      console.error('Error creating workspace:', error);
+      setError('Failed to create workspace. Please try again.');
     }
   };
 
-  const handleAddExperiment = () => {
-    if (!newExperiment.name.trim() || !newExperiment.toteId) {
-      alert('Please fill in all fields');
+  const handleJoinWorkspace = async () => {
+    if (!inputWorkspaceId.trim()) {
+      setError('Please enter a workspace ID');
       return;
     }
 
-    const experiment = {
-      id: Date.now().toString(),
-      name: newExperiment.name.trim(),
-      toteId: newExperiment.toteId,
-      dateAdded: new Date().toISOString()
-    };
-
-    const updated = [...experiments, experiment];
-    saveExperiments(updated);
+    const id = inputWorkspaceId.trim();
     
-    setNewExperiment({ name: '', toteId: '' });
-    setShowSuccess(true);
-    setTimeout(() => {
-      setShowSuccess(false);
-      setView('home');
-    }, 1500);
+    // Check if workspace exists
+    try {
+      const doc = await db.collection('workspaces').doc(id).get();
+      if (doc.exists) {
+        setWorkspaceId(id);
+        localStorage.setItem('workspaceId', id);
+        setView('home');
+        setError('');
+      } else {
+        setError('Workspace not found. Please check the ID and try again.');
+      }
+    } catch (error) {
+      console.error('Error joining workspace:', error);
+      setError('Failed to join workspace. Please try again.');
+    }
+  };
+
+  const handleLeaveWorkspace = () => {
+    if (confirm('Are you sure you want to leave this workspace? You can rejoin using the workspace ID.')) {
+      setWorkspaceId('');
+      localStorage.removeItem('workspaceId');
+      setView('setup');
+      setExperiments([]);
+    }
+  };
+
+  const handleAddExperiment = async () => {
+    if (!newExperiment.name.trim() || !newExperiment.toteId) {
+      setError('Please fill in all fields');
+      return;
+    }
+
+    try {
+      await db.collection('workspaces')
+        .doc(workspaceId)
+        .collection('experiments')
+        .add({
+          name: newExperiment.name.trim(),
+          toteId: newExperiment.toteId,
+          dateAdded: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+      setNewExperiment({ name: '', toteId: '' });
+      setShowSuccess(true);
+      setError('');
+      setTimeout(() => {
+        setShowSuccess(false);
+        setView('home');
+      }, 1500);
+    } catch (error) {
+      console.error('Error adding experiment:', error);
+      setError('Failed to add experiment. Please try again.');
+    }
   };
 
   const handleExportCSV = () => {
@@ -125,7 +217,7 @@ function SeedInventoryApp() {
     const rows = experiments.map(exp => [
       exp.name,
       exp.toteId,
-      new Date(exp.dateAdded).toLocaleDateString()
+      exp.dateAdded ? new Date(exp.dateAdded.toDate()).toLocaleDateString() : 'N/A'
     ]);
 
     const csv = [
@@ -137,36 +229,44 @@ function SeedInventoryApp() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `seed-inventory-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `seed-inventory-${workspaceId}-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const handleImportCSV = (e) => {
+  const handleImportCSV = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const text = event.target.result;
         const lines = text.split('\n').slice(1);
-        const imported = lines
-          .filter(line => line.trim())
-          .map(line => {
-            const [name, toteId] = line.split(',').map(s => s.replace(/"/g, '').trim());
-            return {
-              id: Date.now().toString() + Math.random(),
+        
+        const batch = db.batch();
+        let count = 0;
+
+        lines.filter(line => line.trim()).forEach(line => {
+          const [name, toteId] = line.split(',').map(s => s.replace(/"/g, '').trim());
+          if (name && toteId) {
+            const ref = db.collection('workspaces')
+              .doc(workspaceId)
+              .collection('experiments')
+              .doc();
+            batch.set(ref, {
               name,
               toteId,
-              dateAdded: new Date().toISOString()
-            };
-          });
+              dateAdded: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            count++;
+          }
+        });
 
-        const updated = [...experiments, ...imported];
-        saveExperiments(updated);
-        alert(`Successfully imported ${imported.length} experiments`);
+        await batch.commit();
+        alert(`Successfully imported ${count} experiments`);
       } catch (error) {
+        console.error('Error importing CSV:', error);
         alert('Error importing CSV. Please check the file format.');
       }
     };
@@ -183,18 +283,75 @@ function SeedInventoryApp() {
     return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center' },
       React.createElement('div', { className: 'text-center' },
         React.createElement(Package, { className: 'w-16 h-16 text-green-600 mx-auto mb-4 animate-pulse' }),
-        React.createElement('p', { className: 'text-gray-600' }, 'Loading inventory...')
+        React.createElement('p', { className: 'text-gray-600' }, 'Loading...')
       )
     );
   }
 
+  // Setup view
+  if (view === 'setup') {
+    return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center p-4' },
+      React.createElement('div', { className: 'max-w-md w-full' },
+        React.createElement('div', { className: 'text-center mb-8' },
+          React.createElement(Package, { className: 'w-20 h-20 text-green-600 mx-auto mb-4' }),
+          React.createElement('h1', { className: 'text-3xl font-bold text-gray-800 mb-2' }, 'Seed Inventory'),
+          React.createElement('p', { className: 'text-gray-600' }, 'Create a workspace or join an existing one')
+        ),
+
+        error && React.createElement('div', { className: 'bg-red-50 border border-red-200 rounded-lg p-4 mb-6' },
+          React.createElement('p', { className: 'text-red-800 text-sm' }, error)
+        ),
+
+        React.createElement('div', { className: 'bg-white rounded-xl shadow-lg p-6 mb-4' },
+          React.createElement('div', { className: 'flex items-center gap-3 mb-4' },
+            React.createElement(Plus, { className: 'w-6 h-6 text-green-600' }),
+            React.createElement('h2', { className: 'text-xl font-bold text-gray-800' }, 'Create New Workspace')
+          ),
+          React.createElement('p', { className: 'text-gray-600 text-sm mb-4' }, 
+            'Start a new workspace and share the ID with your team'
+          ),
+          React.createElement('button', {
+            onClick: handleCreateWorkspace,
+            className: 'w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition'
+          }, 'Create Workspace')
+        ),
+
+        React.createElement('div', { className: 'bg-white rounded-xl shadow-lg p-6' },
+          React.createElement('div', { className: 'flex items-center gap-3 mb-4' },
+            React.createElement(Key, { className: 'w-6 h-6 text-blue-600' }),
+            React.createElement('h2', { className: 'text-xl font-bold text-gray-800' }, 'Join Existing Workspace')
+          ),
+          React.createElement('p', { className: 'text-gray-600 text-sm mb-4' }, 
+            'Enter a workspace ID shared by your team'
+          ),
+          React.createElement('input', {
+            type: 'text',
+            value: inputWorkspaceId,
+            onChange: (e) => setInputWorkspaceId(e.target.value),
+            onKeyPress: (e) => e.key === 'Enter' && handleJoinWorkspace(),
+            placeholder: 'e.g., Alpha-Lab-1234',
+            className: 'w-full px-4 py-3 border border-gray-300 rounded-lg mb-4 focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+          }),
+          React.createElement('button', {
+            onClick: handleJoinWorkspace,
+            className: 'w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition'
+          }, 'Join Workspace')
+        )
+      )
+    );
+  }
+
+  // Main app view
   return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-green-50 to-blue-50 pb-20' },
     React.createElement('div', { className: 'bg-white shadow-md sticky top-0 z-10' },
       React.createElement('div', { className: 'max-w-4xl mx-auto px-4 py-4' },
         React.createElement('div', { className: 'flex items-center justify-between' },
           React.createElement('div', { className: 'flex items-center gap-3' },
             React.createElement(Package, { className: 'w-8 h-8 text-green-600' }),
-            React.createElement('h1', { className: 'text-2xl font-bold text-gray-800' }, 'Seed Inventory')
+            React.createElement('div', null,
+              React.createElement('h1', { className: 'text-2xl font-bold text-gray-800' }, 'Seed Inventory'),
+              React.createElement('p', { className: 'text-xs text-gray-500' }, `Workspace: ${workspaceId}`)
+            )
           ),
           React.createElement('div', { className: 'flex gap-2' },
             React.createElement('button', {
@@ -219,14 +376,18 @@ function SeedInventoryApp() {
                 className: 'hidden',
                 onClick: (e) => e.stopPropagation()
               })
-            )
+            ),
+            React.createElement('button', {
+              onClick: handleLeaveWorkspace,
+              className: 'p-2 text-red-600 hover:bg-red-50 rounded-lg transition',
+              title: 'Leave Workspace'
+            }, React.createElement(LogOut, { className: 'w-5 h-5' }))
           )
         )
       )
     ),
 
     React.createElement('div', { className: 'max-w-4xl mx-auto px-4 py-6' },
-      // Import Help Modal
       showImportHelp && React.createElement('div', {
         className: 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4',
         onClick: () => setShowImportHelp(false)
@@ -244,7 +405,7 @@ function SeedInventoryApp() {
             React.createElement('br'),
             '"Corn Hybrid Test",TB-003,10/28/2024'
           ),
-          React.createElement('p', { className: 'text-sm text-gray-500 mb-4' }, 'Note: Date Added column is optional and will auto-generate if missing.'),
+          React.createElement('p', { className: 'text-sm text-gray-500 mb-4' }, 'Note: Date Added column is optional.'),
           React.createElement('button', {
             onClick: () => setShowImportHelp(false),
             className: 'w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition'
@@ -326,6 +487,10 @@ function SeedInventoryApp() {
             React.createElement('span', { className: 'text-green-800 font-medium' }, 'Experiment added successfully!')
           ),
 
+          error && React.createElement('div', { className: 'mb-6 bg-red-50 border border-red-200 rounded-lg p-4' },
+            React.createElement('p', { className: 'text-red-800 text-sm' }, error)
+          ),
+
           React.createElement('div', { className: 'space-y-4' },
             React.createElement('div', null,
               React.createElement('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Experiment Name'),
@@ -338,7 +503,7 @@ function SeedInventoryApp() {
               })
             ),
 
-            React.createElement('div', null,
+ React.createElement('div', null,
               React.createElement('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Tote Box ID'),
               React.createElement('select', {
                 value: newExperiment.toteId,
@@ -402,7 +567,7 @@ function SeedInventoryApp() {
                   React.createElement('div', { className: 'text-xs text-gray-500 text-right' },
                     'Added',
                     React.createElement('br'),
-                    new Date(exp.dateAdded).toLocaleDateString()
+                    exp.dateAdded ? new Date(exp.dateAdded.toDate()).toLocaleDateString() : 'N/A'
                   )
                 )
               )
