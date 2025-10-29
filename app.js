@@ -74,6 +74,11 @@ function SeedInventoryApp() {
   const [showImportHelp, setShowImportHelp] = useState(false);
   const [error, setError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  // NEW STATE: To manage the Add Experiment flow
+  const [toteInputMode, setToteInputMode] = useState('select'); // 'select' or 'new'
+  const [newToteId, setNewToteId] = useState('');
+  const [showConfirmation, setShowConfirmation] = useState(false);
+
 
   // Check for existing workspace on load
   useEffect(() => {
@@ -86,21 +91,24 @@ function SeedInventoryApp() {
   }, []);
 
   // Load tote boxes from file
+  // MODIFIED: Changed default tote names
   useEffect(() => {
     fetch('totes.json')
       .then(res => res.json())
       .then(data => setToteBoxes(data.totes || data))
       .catch(() => {
-        const defaultTotes = ['TB-001', 'TB-002', 'TB-003', 'TB-004', 'TB-005'];
+        // Updated default tote box names
+        const defaultTotes = ['TB-S001', 'TB-S002', 'TB-A20', 'TB-B35', 'TB-Z99'];
         setToteBoxes(defaultTotes);
       });
   }, []);
 
-  // Real-time listener for experiments
+  // Real-time listener for experiments AND totes
   useEffect(() => {
     if (!workspaceId) return;
 
-    const unsubscribe = db.collection('workspaces')
+    // Listener for Experiments
+    const unsubscribeExp = db.collection('workspaces')
       .doc(workspaceId)
       .collection('experiments')
       .orderBy('dateAdded', 'desc')
@@ -115,7 +123,31 @@ function SeedInventoryApp() {
         setError('Failed to load experiments. Please check your connection.');
       });
 
-    return () => unsubscribe();
+    // Listener for Totes
+    // Assuming a 'totes' collection under 'workspaces' for dynamically added totes
+    const unsubscribeTotes = db.collection('workspaces')
+      .doc(workspaceId)
+      .collection('totes')
+      .onSnapshot(snapshot => {
+        const dynamicTotes = snapshot.docs.map(doc => doc.id);
+        
+        // Merge with file-loaded totes (if any)
+        setToteBoxes(prevTotes => {
+            const fileTotes = prevTotes.filter(tote => !dynamicTotes.includes(tote));
+            const uniqueDynamicTotes = dynamicTotes.filter(tote => !fileTotes.includes(tote));
+
+            // Keep the default/file totes and append the new dynamic ones, then sort
+            return [...fileTotes, ...uniqueDynamicTotes].sort();
+        });
+
+      }, error => {
+        console.error('Error loading dynamic totes:', error);
+      });
+
+    return () => {
+      unsubscribeExp();
+      unsubscribeTotes();
+    };
   }, [workspaceId]);
 
   const sanitizeWorkspaceName = (name) => {
@@ -203,25 +235,73 @@ function SeedInventoryApp() {
     }
   };
 
-  const handleAddExperiment = async () => {
-    if (!newExperiment.name.trim() || !newExperiment.toteId) {
+  // NEW/MODIFIED: Logic to handle adding a new experiment, including new tote creation and confirmation.
+  const handleAddExperiment = async (confirmed = false) => {
+    let finalToteId = newExperiment.toteId;
+
+    if (toteInputMode === 'new') {
+        finalToteId = newToteId.trim();
+    }
+    
+    if (!newExperiment.name.trim() || !finalToteId) {
       setError('Please fill in all fields');
       return;
     }
 
+    setError('');
+    
+    // Check if new tote is being added AND it's a *new* tote ID
+    if (toteInputMode === 'new' && !toteBoxes.includes(finalToteId)) {
+        if (!confirmed) {
+            // Trigger confirmation dialog for new tote
+            setShowConfirmation(true);
+            return;
+        }
+
+        // Check if new tote ID already exists (just in case of race condition or if the user used the input field for an existing tote)
+        if (toteBoxes.includes(finalToteId)) {
+            // This should not happen if confirmation is true and the state was correct, but good to check.
+            console.warn('Tote already exists, proceeding without creation.');
+        } else {
+            // New tote is confirmed and needs creation
+            try {
+                await db.collection('workspaces')
+                    .doc(workspaceId)
+                    .collection('totes')
+                    .doc(finalToteId)
+                    .set({ createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+                console.log(`New tote ${finalToteId} created successfully.`);
+            } catch (error) {
+                console.error('Error creating new tote:', error);
+                // Non-fatal error, continue adding experiment
+            }
+        }
+    }
+    
+    // Check for existing tote error only for the "Add new tote" input field before final submission
+    if (toteInputMode === 'new' && toteBoxes.includes(finalToteId) && !confirmed) {
+         setError(`Error: Tote ID "${finalToteId}" already exists. Please select it from the dropdown or enter a new unique ID.`);
+         return;
+    }
+
+    // Add experiment
     try {
       await db.collection('workspaces')
         .doc(workspaceId)
         .collection('experiments')
         .add({
           name: newExperiment.name.trim(),
-          toteId: newExperiment.toteId,
+          toteId: finalToteId,
           dateAdded: firebase.firestore.FieldValue.serverTimestamp()
         });
 
+      // Reset state and show success
       setNewExperiment({ name: '', toteId: '' });
+      setNewToteId('');
+      setToteInputMode('select');
+      setShowConfirmation(false);
       setShowSuccess(true);
-      setError('');
+      
       setTimeout(() => {
         setShowSuccess(false);
         setView('home');
@@ -230,6 +310,14 @@ function SeedInventoryApp() {
       console.error('Error adding experiment:', error);
       setError('Failed to add experiment. Please try again.');
     }
+  };
+  
+  // Confirmation handler
+  const handleConfirmAddExperiment = (isConfirmed) => {
+      setShowConfirmation(false);
+      if (isConfirmed) {
+          handleAddExperiment(true); // Pass true to skip confirmation and check for existing tote logic
+      }
   };
 
   const handleExportCSV = () => {
@@ -270,11 +358,22 @@ function SeedInventoryApp() {
         const lines = text.split('\n').slice(1);
         
         const batch = db.batch();
-        let count = 0;
+        let experimentCount = 0;
+        let toteIdsToAdd = new Set();
+        const existingTotes = new Set(toteBoxes);
 
         lines.filter(line => line.trim()).forEach(line => {
-          const [name, toteId] = line.split(',').map(s => s.replace(/"/g, '').trim());
+          // MODIFIED: Corrected split for CSV with quoted names
+          const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(s => s.replace(/"/g, '').trim());
+          const [name, toteId] = parts;
+
           if (name && toteId) {
+            // 1. Add tote ID to a set for batch creation if it's new
+            if (!existingTotes.has(toteId) && toteId.length > 0) {
+                toteIdsToAdd.add(toteId);
+            }
+            
+            // 2. Prepare experiment for batch addition
             const ref = db.collection('workspaces')
               .doc(workspaceId)
               .collection('experiments')
@@ -284,15 +383,24 @@ function SeedInventoryApp() {
               toteId,
               dateAdded: firebase.firestore.FieldValue.serverTimestamp()
             });
-            count++;
+            experimentCount++;
           }
         });
 
+        // 3. Add new totes to the batch (this handles new/existing totes correctly)
+        toteIdsToAdd.forEach(toteId => {
+            const toteRef = db.collection('workspaces')
+                .doc(workspaceId)
+                .collection('totes')
+                .doc(toteId);
+            batch.set(toteRef, { createdAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        });
+
         await batch.commit();
-        alert(`Successfully imported ${count} experiments`);
+        alert(`Successfully imported ${experimentCount} experiments. Added ${toteIdsToAdd.size} new tote IDs.`);
       } catch (error) {
         console.error('Error importing CSV:', error);
-        alert('Error importing CSV. Please check the file format.');
+        alert('Error importing CSV. Please check the file format and ensure no values contain commas without quotes.');
       }
     };
     reader.readAsText(file);
@@ -313,7 +421,7 @@ function SeedInventoryApp() {
     );
   }
 
-  // Setup view
+  // Setup view (No changes)
   if (view === 'setup') {
     return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center p-4' },
       React.createElement('div', { className: 'max-w-md w-full' },
@@ -400,7 +508,8 @@ function SeedInventoryApp() {
               className: 'p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer',
               title: 'Import CSV',
               onClick: (e) => {
-                if (!e.target.matches('input')) {
+                // Ensure the click handler is not on the input itself
+                if (!e.target.matches('input') && e.target.tagName !== 'INPUT') { 
                   setShowImportHelp(true);
                 }
               }
@@ -438,15 +547,41 @@ function SeedInventoryApp() {
           React.createElement('div', { className: 'bg-gray-50 p-4 rounded-lg mb-4 font-mono text-sm' },
             'Experiment Name,Tote Box ID,Date Added',
             React.createElement('br'),
-            '"Winter Wheat 2025",TB-001,10/29/2024',
+            '"Winter Wheat 2025",TB-S001,10/29/2024',
             React.createElement('br'),
-            '"Corn Hybrid Test",TB-003,10/28/2024'
+            '"Corn Hybrid Test",TB-A20,10/28/2024'
           ),
           React.createElement('p', { className: 'text-sm text-gray-500 mb-4' }, 'Note: Date Added column is optional.'),
           React.createElement('button', {
             onClick: () => setShowImportHelp(false),
             className: 'w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition'
           }, 'Got it!')
+        )
+      ),
+      
+      // NEW: Confirmation Dialog
+      showConfirmation && React.createElement('div', {
+        className: 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4',
+        onClick: () => handleConfirmAddExperiment(false) // No on click on overlay to prevent accidental no
+      },
+        React.createElement('div', {
+          className: 'bg-white rounded-xl p-6 max-w-sm w-full shadow-xl',
+          onClick: (e) => e.stopPropagation()
+        },
+          React.createElement('h3', { className: 'text-xl font-bold mb-4 text-gray-800' }, 'Confirm New Tote'),
+          React.createElement('p', { className: 'text-gray-600 mb-6' }, 
+            `Are you sure you want to add experiment "${newExperiment.name.trim()}" and create the new Tote Box ID: **${newToteId.trim()}**?`
+          ),
+          React.createElement('div', { className: 'flex gap-3 justify-end' },
+            React.createElement('button', {
+              onClick: () => handleConfirmAddExperiment(false),
+              className: 'px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition'
+            }, 'No'),
+            React.createElement('button', {
+              onClick: () => handleConfirmAddExperiment(true),
+              className: 'px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-semibold'
+            }, 'Yes')
+          )
         )
       ),
 
@@ -494,9 +629,16 @@ function SeedInventoryApp() {
         )
       ),
 
+      // MODIFIED: 'add' view to support selecting or adding a new tote
       view === 'add' && React.createElement('div', { className: 'space-y-6' },
         React.createElement('button', {
-          onClick: () => setView('home'),
+          onClick: () => {
+            setView('home');
+            setError(''); // Clear error on back
+            setToteInputMode('select'); // Reset mode
+            setNewToteId(''); // Reset new tote id
+            setNewExperiment({ name: '', toteId: '' }); // Reset experiment data
+          },
           className: 'flex items-center gap-2 text-gray-600 hover:text-gray-800'
         },
           React.createElement(X, { className: 'w-5 h-5' }),
@@ -529,7 +671,21 @@ function SeedInventoryApp() {
 
             React.createElement('div', null,
               React.createElement('label', { className: 'block text-sm font-medium text-gray-700 mb-2' }, 'Tote Box ID'),
-              React.createElement('select', {
+              
+              // Option toggle buttons
+              React.createElement('div', { className: 'flex mb-3 space-x-2' },
+                  React.createElement('button', {
+                      onClick: () => { setToteInputMode('select'); setError(''); setNewToteId(''); },
+                      className: `flex-1 px-4 py-2 text-sm rounded-lg border transition ${toteInputMode === 'select' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`
+                  }, 'Select Existing Tote'),
+                  React.createElement('button', {
+                      onClick: () => { setToteInputMode('new'); setError(''); setNewExperiment({ ...newExperiment, toteId: '' }); },
+                      className: `flex-1 px-4 py-2 text-sm rounded-lg border transition ${toteInputMode === 'new' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`
+                  }, 'Add New Tote')
+              ),
+              
+              // Select Existing Tote dropdown
+              toteInputMode === 'select' && React.createElement('select', {
                 value: newExperiment.toteId,
                 onChange: (e) => setNewExperiment({ ...newExperiment, toteId: e.target.value }),
                 className: 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent'
@@ -538,7 +694,16 @@ function SeedInventoryApp() {
                 toteBoxes.map(tote =>
                   React.createElement('option', { key: tote, value: tote }, tote)
                 )
-              )
+              ),
+              
+              // Add New Tote input
+              toteInputMode === 'new' && React.createElement('input', {
+                type: 'text',
+                value: newToteId,
+                onChange: (e) => setNewToteId(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '')), // Basic validation
+                placeholder: 'e.g., TB-250045',
+                className: 'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent'
+              })
             ),
 
             React.createElement('button', {
